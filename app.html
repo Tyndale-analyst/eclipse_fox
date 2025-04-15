@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>이클립스 AR 데모</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #000;
+        }
+        
+        #mainVideo {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        
+        #debugCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+        
+        canvas {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            z-index: 3;
+        }
+        
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: white;
+            text-align: center;
+        }
+        
+        .loading-screen p {
+            margin: 5px 0;
+        }
+        
+        .loading-screen button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        #debug-panel {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 10;
+            max-width: 250px;
+            font-size: 14px;
+        }
+        
+        #debug-panel div {
+            margin: 5px 0;
+        }
+        
+        #model-preview {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 150px;
+            height: 150px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            z-index: 10;
+            border: 1px solid #444;
+            overflow: hidden;
+        }
+        
+        #model-type {
+            position: fixed;
+            bottom: 170px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        
+        .control-buttons {
+            position: fixed;
+            left: 10px;
+            bottom: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .control-buttons button {
+            padding: 10px 15px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        
+        .control-buttons button:hover {
+            background-color: #0b7dda;
+        }
+    </style>
+</head>
+<body>
+    <div id="ar-app">
+        <!-- 메인 비디오 캡처 -->
+        <video id="mainVideo" autoplay playsinline></video>
+        
+        <!-- 디버그 캔버스 -->
+        <canvas id="debugCanvas"></canvas>
+        
+        <!-- 로딩 화면 -->
+        <div class="loading-screen" id="loading-screen">
+            <h2>이클립스 AR 데모</h2>
+            <p id="loading-status">카메라 초기화 중...</p>
+            <p id="loading-help" style="font-size: 12px; color: #aaa; max-width: 300px">
+                카메라 권한 요청이 나타나면 '허용'을 눌러주세요.
+            </p>
+            <button id="start-button">수동으로 시작하기</button>
+        </div>
+        
+        <!-- 디버그 정보 패널 -->
+        <div id="debug-panel">
+            <h3>디버그 정보:</h3>
+            <div id="marker-status">마커 인식 상태: 대기 중</div>
+            <div id="confidence">마커 인식률(신뢰도): 0%</div>
+            <div id="model-status">모델 로딩 상태: 로딩 전</div>
+            <div id="camera-status">카메라 상태: 초기화 중</div>
+        </div>
+        
+        <!-- 3D 모델 미리보기 -->
+        <div id="model-preview"></div>
+        <div id="model-type">모델 타입: 로딩 전</div>
+        
+        <!-- 제어 버튼 -->
+        <div class="control-buttons">
+            <button id="refresh-camera">카메라 새로고침</button>
+            <button id="refresh-model">모델 새로고침</button>
+        </div>
+    </div>
+    
+    <!-- Three.js 라이브러리 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TextureLoader } from 'three';
+        
+        // 전역 변수
+        let video, canvas, context;
+        let scene, camera, renderer, mainModel;
+        let previewScene, previewCamera, previewRenderer;
+        let isModelLoaded = false;
+        let isMarkerDetected = false;
+        let modelType = "없음";
+        let videoStarted = false;
+        
+        // DOM 요소 참조
+        const loadingScreen = document.getElementById('loading-screen');
+        const loadingStatus = document.getElementById('loading-status');
+        const loadingHelp = document.getElementById('loading-help');
+        const startButton = document.getElementById('start-button');
+        const refreshCameraButton = document.getElementById('refresh-camera');
+        const refreshModelButton = document.getElementById('refresh-model');
+        
+        // 텍스처 로더 초기화
+        const textureLoader = new TextureLoader();
+        
+        // 텍스처 로드 함수
+        function loadTexture(path) {
+            return new Promise((resolve, reject) => {
+                textureLoader.load(
+                    path,
+                    (texture) => {
+                        console.log('텍스처 로드 성공:', path);
+                        resolve(texture);
+                    },
+                    undefined,
+                    (error) => {
+                        console.error('텍스처 로드 실패:', error);
+                        reject(error);
+                    }
+                );
+            });
+        }
+        
+        // 상태 업데이트 함수
+        function updateStatus(id, message) {
+            document.getElementById(id).textContent = message;
+        }
+        
+        // 로딩 상태 업데이트
+        function updateLoadingStatus(message) {
+            loadingStatus.textContent = message;
+            console.log(message);
+        }
+        
+        // 로딩 화면 표시/숨김
+        function setLoadingVisible(visible) {
+            loadingScreen.style.display = visible ? 'flex' : 'none';
+        }
+        
+        // 앱 초기화
+        function initApp() {
+            // 버튼 이벤트 리스너 설정
+            startButton.addEventListener('click', initCamera);
+            refreshCameraButton.addEventListener('click', restartCamera);
+            refreshModelButton.addEventListener('click', loadModel);
+            
+            // 5초 후 자동으로 로딩 화면 숨기기
+            setTimeout(() => setLoadingVisible(false), 5000);
+            
+            // 카메라 초기화
+            initCamera();
+        }
+        
+        // 카메라 초기화
+        function initCamera() {
+            updateLoadingStatus('카메라 권한 요청 중...');
+            updateStatus('camera-status', '카메라 상태: 권한 요청 중');
+            
+            video = document.getElementById('mainVideo');
+            
+            const constraints = { 
+                video: true, 
+                audio: false 
+            };
+            
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(stream => {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        updateStatus('camera-status', '카메라 상태: 활성화됨');
+                        updateLoadingStatus('카메라 준비 완료');
+                        
+                        // 캔버스 초기화
+                        initCanvas();
+                        
+                        // 3D 렌더링 초기화
+                        initThreeJS();
+                        
+                        // 모델 로드
+                        loadModel();
+                        
+                        // 프레임 처리 시작
+                        videoStarted = true;
+                        processVideo();
+                        
+                        // 로딩 화면 숨기기
+                        setTimeout(() => setLoadingVisible(false), 1000);
+                    };
+                    
+                    video.onerror = err => {
+                        console.error('비디오 오류:', err);
+                        updateStatus('camera-status', '카메라 상태: 오류 발생');
+                        updateLoadingStatus('카메라 초기화 실패');
+                    };
+                })
+                .catch(err => {
+                    console.error('카메라 접근 오류:', err);
+                    updateStatus('camera-status', '카메라 상태: 권한 거부됨');
+                    updateLoadingStatus('카메라 권한이 거부되었습니다');
+                    loadingHelp.innerHTML = '브라우저 설정에서 카메라 권한을 허용한 후 새로고침 해주세요.';
+                    loadingHelp.style.color = '#ff5555';
+                });
+        }
+        
+        // 카메라 재시작
+        function restartCamera() {
+            if (video && video.srcObject) {
+                // 기존 비디오 스트림 중지
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            // 로딩 화면 표시
+            setLoadingVisible(true);
+            
+            // 카메라 다시 초기화
+            initCamera();
+        }
+        
+        // 캔버스 초기화
+        function initCanvas() {
+            canvas = document.getElementById('debugCanvas');
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            context = canvas.getContext('2d', { willReadFrequently: true });
+        }
+        
+        // Three.js 초기화
+        function initThreeJS() {
+            // 메인 씬 설정
+            scene = new THREE.Scene();
+            
+            // 카메라 설정
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+            camera.position.z = 1.0;
+            
+            // 렌더러 설정
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+            
+            // 조명 설정
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // 미리보기 초기화
+            initModelPreview();
+            
+            // 창 크기 변경 이벤트
+            window.addEventListener('resize', () => {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                
+                renderer.setSize(width, height);
+            });
+            
+            // 애니메이션 루프 시작
+            animate();
+        }
+        
+        // 모델 미리보기 초기화
+        function initModelPreview() {
+            // 미리보기 씬 설정
+            previewScene = new THREE.Scene();
+            previewScene.background = new THREE.Color(0x333333);
+            
+            // 미리보기 카메라 설정
+            previewCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+            previewCamera.position.set(0, 0, 0.5);
+            previewCamera.lookAt(0, 0, 0);
+            
+            // 미리보기 렌더러 설정
+            previewRenderer = new THREE.WebGLRenderer({ antialias: true });
+            previewRenderer.setSize(150, 150);
+            document.getElementById('model-preview').appendChild(previewRenderer.domElement);
+            
+            // 미리보기 조명 설정
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            previewScene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            previewScene.add(directionalLight);
+            
+            // 그리드 헬퍼 추가
+            const gridHelper = new THREE.GridHelper(0.5, 10, 0x444444, 0x222222);
+            previewScene.add(gridHelper);
+            
+            // 미리보기 컨트롤 추가
+            const previewControls = new OrbitControls(previewCamera, previewRenderer.domElement);
+            previewControls.enableDamping = true;
+            previewControls.dampingFactor = 0.05;
+            previewControls.enableZoom = true;
+            previewControls.enablePan = false;
+            
+            // 미리보기 애니메이션 시작
+            animatePreview();
+        }
+        
+        // 모델 로드 함수
+        async function loadModel() {
+            updateStatus('model-status', '모델 로딩 상태: 로딩 중...');
+            console.log('모델 로딩 시작...');
+            
+            // 기존 모델 제거
+            if (mainModel) {
+                scene.remove(mainModel);
+                mainModel = null;
+            }
+            
+            // 미리보기에서도 모델 제거
+            clearModelFromPreview();
+            
+            // GitHub Pages URL 기반으로 경로 설정
+            const baseUrl = window.location.href.includes('github.io') 
+                ? window.location.href.substring(0, window.location.href.lastIndexOf('/') + 1)
+                : window.location.origin + '/';
+            
+            console.log('기본 URL:', baseUrl);
+            
+            let filesNotFound = false;
+            
+            // 먼저 OBJ 파일 로드 시도
+            try {
+                const objPath = baseUrl + 'models/shaded_obj/base.obj';
+                console.log('OBJ 모델 로드 시도:', objPath);
+                updateStatus('model-status', '모델 로딩 상태: OBJ 모델 로드 중');
+                
+                const objSuccess = await loadOBJModel(objPath);
+                if (objSuccess) {
+                    console.log('★★★ OBJ 모델 로드 성공! ★★★');
+                    modelType = "OBJ 모델 (base.obj)";
+                    isModelLoaded = true;
+                    document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+                    updateStatus('model-status', '모델 로딩 상태: OBJ 모델 로드 완료');
+                    return;
+                } else {
+                    console.warn('OBJ 모델 로드 실패, STL 시도 예정');
+                    if (window.lastModelLoadError && window.lastModelLoadError.includes('404')) {
+                        filesNotFound = true;
+                    }
+                }
+            } catch (error) {
+                console.error('OBJ 모델 로드 시도 중 예외 발생:', error);
+            }
+            
+            // OBJ 로드 실패 시 STL 파일 로드 시도
+            try {
+                const stlPath = baseUrl + 'models/shaded_stl/base.stl';
+                console.log('STL 모델 로드 시도:', stlPath);
+                updateStatus('model-status', '모델 로딩 상태: STL 모델 로드 중');
+                
+                const stlSuccess = await loadSTLModel(stlPath);
+                if (stlSuccess) {
+                    console.log('★★★ STL 모델 로드 성공! ★★★');
+                    modelType = "STL 모델 (base.stl)";
+                    isModelLoaded = true;
+                    document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+                    updateStatus('model-status', '모델 로딩 상태: STL 모델 로드 완료');
+                    return;
+                } else {
+                    console.warn('STL 모델 로드 실패, 폴백 모델 사용 예정');
+                    if (window.lastModelLoadError && window.lastModelLoadError.includes('404')) {
+                        filesNotFound = true;
+                    }
+                }
+            } catch (error) {
+                console.error('STL 모델 로드 시도 중 예외 발생:', error);
+            }
+            
+            // 파일이 404 에러였으면 파일 없음 메시지 표시
+            if (filesNotFound) {
+                console.error('⚠️ 모델 파일을 찾을 수 없습니다: 폴백 모델로 대체합니다');
+                updateStatus('model-status', '모델 로딩 상태: 파일 없음, 폴백 사용');
+                
+                // 파일 없음 메시지 표시
+                const errorMsg = document.createElement('div');
+                errorMsg.style.position = 'fixed';
+                errorMsg.style.top = '10px';
+                errorMsg.style.left = '50%';
+                errorMsg.style.transform = 'translateX(-50%)';
+                errorMsg.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+                errorMsg.style.color = 'white';
+                errorMsg.style.padding = '10px';
+                errorMsg.style.borderRadius = '5px';
+                errorMsg.style.zIndex = '9999';
+                errorMsg.textContent = '⚠️ 모델 파일을 찾을 수 없어 폴백 모델을 사용합니다';
+                document.body.appendChild(errorMsg);
+                
+                // 3초 후 메시지 제거
+                setTimeout(() => {
+                    if (errorMsg.parentNode) {
+                        errorMsg.parentNode.removeChild(errorMsg);
+                    }
+                }, 5000);
+            }
+            
+            // CORS 문제를 감지하고 사용자에게 안내 메시지 표시
+            showCorsHelpMessage();
+            
+            // 즉시 폴백 모델 생성
+            console.log('모델 파일 로드 실패, 폴백 모델로 대체합니다');
+            try {
+                console.log('Torus 폴백 모델 생성 중');
+                createFallbackModel();
+                isModelLoaded = true;
+                updateStatus('model-status', '모델 로딩 상태: 폴백 모델 로드 완료');
+                modelType = "폴백 모델 (Torus)";
+                document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+                console.log('폴백 모델 생성 완료');
+            } catch (error) {
+                console.error('폴백 모델 생성 오류:', error);
+                updateStatus('model-status', '모델 로딩 상태: 모든 모델 로드 실패');
+            }
+        }
+        
+        // CORS 도움말 메시지 표시
+        function showCorsHelpMessage() {
+            // 이미 메시지가 있으면 제거
+            const existingMsg = document.getElementById('cors-help-message');
+            if (existingMsg) {
+                existingMsg.remove();
+            }
+            
+            // 메시지 생성
+            const corsMessage = document.createElement('div');
+            corsMessage.id = 'cors-help-message';
+            corsMessage.style.position = 'fixed';
+            corsMessage.style.top = '50%';
+            corsMessage.style.left = '50%';
+            corsMessage.style.transform = 'translate(-50%, -50%)';
+            corsMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            corsMessage.style.color = 'white';
+            corsMessage.style.padding = '20px';
+            corsMessage.style.borderRadius = '10px';
+            corsMessage.style.maxWidth = '80%';
+            corsMessage.style.zIndex = '9999';
+            corsMessage.style.textAlign = 'center';
+            
+            corsMessage.innerHTML = `
+                <h2>CORS 보안 제한 안내</h2>
+                <p>브라우저 보안 정책으로 인해 로컬 파일에서 모델 로드가 차단되었습니다.</p>
+                <p>⚠️ 대체 모델을 사용하여 증강현실은 정상 작동합니다.</p>
+                <p><strong>실제 모델 파일을 로드하기 위한 해결 방법:</strong></p>
+                <ol style="text-align: left; margin: 10px 0 20px 20px;">
+                    <li>Chrome 브라우저를 아래 옵션으로 실행:
+                        <div style="background: #222; padding: 6px; margin: 4px 0; border-radius: 4px;">
+                            <code>chrome.exe --allow-file-access-from-files</code>
+                        </div>
+                    </li>
+                    <li>Python 웹 서버로 실행:
+                        <div style="background: #222; padding: 6px; margin: 4px 0; border-radius: 4px;">
+                            <code>python -m http.server 8000</code>
+                        </div>
+                        그런 다음 <a href="http://localhost:8000" style="color: #4fc3f7;">http://localhost:8000</a>으로 접속
+                    </li>
+                    <li>Visual Studio Code에서 'Live Server' 확장 프로그램 사용</li>
+                </ol>
+                <button id="close-cors-message" style="padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    확인, 내장 모델로 계속하기
+                </button>
+            `;
+            
+            document.body.appendChild(corsMessage);
+            
+            document.getElementById('close-cors-message').addEventListener('click', function() {
+                corsMessage.style.display = 'none';
+            });
+            
+            // 10초 후 자동으로 닫기
+            setTimeout(() => {
+                if (corsMessage.parentNode) {
+                    corsMessage.style.display = 'none';
+                }
+            }, 10000);
+        }
+        
+        // 이클립스 틴케이스 3D 모델 생성 함수
+        function createEclipseTinModel() {
+            // 객체 그룹 생성
+            mainModel = new THREE.Group();
+            
+            // 원통형 바닥 생성 (틴케이스 바닥)
+            const baseGeometry = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 32);
+            const baseMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x3366ff, // 파란색 (이클립스 색상)
+                shininess: 100,
+                specular: 0x444444
+            });
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.y = -0.01;
+            mainModel.add(base);
+            
+            // 원통형 몸체 생성 (틴케이스 본체)
+            const bodyGeometry = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 32);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x3366ff, 
+                shininess: 100,
+                specular: 0x444444
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.y = 0.01;
+            mainModel.add(body);
+            
+            // 상단 로고 생성 (심플한 텍스처)
+            const logoGeometry = new THREE.CircleGeometry(0.06, 32);
+            const logoMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff,
+            });
+            const logo = new THREE.Mesh(logoGeometry, logoMaterial);
+            logo.position.y = 0.021;
+            logo.rotation.x = -Math.PI / 2;
+            mainModel.add(logo);
+            
+            // E 모양의 텍스트 추가
+            const textGeometry = new THREE.BoxGeometry(0.04, 0.01, 0.01);
+            const textMaterial = new THREE.MeshBasicMaterial({ color: 0x3366ff });
+            const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+            textMesh.position.set(0, 0.022, 0);
+            textMesh.rotation.x = -Math.PI / 2;
+            mainModel.add(textMesh);
+            
+            // 내부 민트 사탕 (작은 구체들)
+            const mintCount = 5;
+            const mintRadius = 0.01;
+            const mintMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xd1ffe3, 
+                shininess: 80 
+            });
+            
+            for (let i = 0; i < mintCount; i++) {
+                const angle = (i / mintCount) * Math.PI * 2;
+                const distance = 0.03;
+                
+                const mintGeometry = new THREE.SphereGeometry(mintRadius, 16, 16);
+                const mint = new THREE.Mesh(mintGeometry, mintMaterial);
+                
+                mint.position.x = Math.cos(angle) * distance;
+                mint.position.z = Math.sin(angle) * distance;
+                mint.position.y = 0;
+                
+                mainModel.add(mint);
+            }
+            
+            // 모델 위치 및 크기 조정
+            mainModel.scale.set(0.5, 0.5, 0.5);
+            mainModel.position.set(0, 0, -0.5);
+            
+            // 씬에 추가 (처음에는 숨김)
+            mainModel.visible = false;
+            scene.add(mainModel);
+            
+            // 모델 타입 업데이트
+            modelType = "내장 이클립스 틴 모델";
+            document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+            updateStatus('model-status', '모델 로딩 상태: 내장 이클립스 틴 모델 로드 완료');
+            
+            // 미리보기 업데이트
+            updateModelPreview();
+            
+            return true;
+        }
+        
+        // 폴백 모델 생성 함수 - Torus로 고정
+        function createFallbackModel() {
+            console.log('Torus 폴백 모델 생성 시작');
+            
+            // Torus 지오메트리 생성
+            const geometry = new THREE.TorusGeometry(0.07, 0.03, 16, 32);
+            
+            // 광택 있는 재질 - 이클립스 파란색
+            const material = new THREE.MeshPhongMaterial({ 
+                color: 0x3366ff,
+                shininess: 70,
+                specular: 0x222222
+            });
+            
+            // 메시 생성
+            const mesh = new THREE.Mesh(geometry, material);
+            mainModel = new THREE.Object3D();
+            mainModel.add(mesh);
+            
+            // 모델 위치 및 회전 조정
+            mainModel.position.set(0, 0, -0.5);
+            mainModel.rotation.set(Math.PI/4, 0, 0); // 약간 기울임
+            
+            // 씬에 추가 (처음에는 숨김)
+            mainModel.visible = false;
+            scene.add(mainModel);
+            
+            // 모델 타입 업데이트
+            modelType = "폴백 모델 (Torus)";
+            document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+            updateStatus('model-status', '모델 로딩 상태: Torus 폴백 모델 생성됨');
+            
+            // 미리보기 업데이트
+            updateModelPreview();
+            
+            console.log('Torus 폴백 모델 생성 완료');
+            
+            return true;
+        }
+        
+        // 기존 동기적 파일 로드 함수 유지
+        function loadFileContentsSync(url) {
+            return new Promise((resolve, reject) => {
+                try {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', url, true);
+                    xhr.onload = function() {
+                        if (xhr.status === 200) {
+                            resolve(xhr.responseText);
+                        } else {
+                            console.warn(`파일 로드 실패 (${url}): 상태 코드 ${xhr.status}`);
+                            resolve(null);
+                        }
+                    };
+                    xhr.onerror = function(e) {
+                        console.error(`파일 로드 오류 (${url}):`, e);
+                        resolve(null);
+                    };
+                    xhr.send();
+                } catch (error) {
+                    console.error(`XMLHttpRequest 오류 (${url}):`, error);
+                    resolve(null);
+                }
+            });
+        }
+        
+        // OBJ 모델 로드
+        function loadOBJModel(path) {
+            return new Promise(async (resolve) => {
+                window.lastModelLoadError = null;
+                
+                console.log(`OBJ 모델 로드 시작: ${path}`);
+                
+                try {
+                    // 텍스처 로드 시도
+                    const texturePath = path.replace('base.obj', 'shaded.png');
+                    const texture = await loadTexture(texturePath);
+                    
+                    // 경로가 유효한지 먼저 체크
+                    const response = await fetch(path);
+                    if (!response.ok) {
+                        const errorMsg = `OBJ 파일 접근 실패 (${path}): ${response.status} ${response.statusText}`;
+                        console.error(errorMsg);
+                        window.lastModelLoadError = errorMsg;
+                        resolve(false);
+                        return;
+                    }
+                    
+                    console.log(`OBJ 파일 접근 성공 (${path})`);
+                    
+                    // 파일 접근 성공 시 OBJ 로더 사용
+                    const objLoader = new OBJLoader();
+                    
+                    objLoader.load(
+                        path,
+                        (object) => {
+                            console.log('OBJ 로드 성공!', object);
+                            mainModel = object;
+                            
+                            // 모델 스케일 및 위치 조정
+                            mainModel.scale.set(0.1, 0.1, 0.1);
+                            mainModel.rotation.set(0, 0, 0);
+                            mainModel.position.set(0, 0, -0.5);
+                            
+                            // 재질 설정
+                            mainModel.traverse((child) => {
+                                if (child instanceof THREE.Mesh) {
+                                    // 텍스처가 있는 셰이딩 재질 적용
+                                    child.material = new THREE.MeshPhongMaterial({
+                                        map: texture,
+                                        shininess: 70,
+                                        specular: 0x444444
+                                    });
+                                }
+                            });
+                            
+                            // 씬에 추가 (처음에는 숨김)
+                            mainModel.visible = false;
+                            scene.add(mainModel);
+                            
+                            // 미리보기 업데이트
+                            updateModelPreview();
+                            
+                            resolve(true);
+                        },
+                        (xhr) => {
+                            const percent = xhr.total ? (xhr.loaded / xhr.total * 100).toFixed(0) : 'unknown';
+                            console.log(`OBJ 로딩 진행률: ${percent}%`);
+                            updateStatus('model-status', `모델 로딩 상태: OBJ 로드 중 ${percent}%`);
+                        },
+                        (error) => {
+                            const errorMsg = `OBJ 로드 오류 (${path}): ${error}`;
+                            console.error(errorMsg);
+                            window.lastModelLoadError = errorMsg;
+                            resolve(false);
+                        }
+                    );
+                } catch (error) {
+                    console.error('모델 로드 중 오류:', error);
+                    resolve(false);
+                }
+            });
+        }
+        
+        // STL 모델 로드
+        function loadSTLModel(path) {
+            return new Promise((resolve) => {
+                window.lastModelLoadError = null;
+                
+                console.log(`STL 모델 로드 시작: ${path}`);
+                
+                // 경로가 유효한지 먼저 체크
+                fetch(path)
+                    .then(response => {
+                        if (!response.ok) {
+                            const errorMsg = `STL 파일 접근 실패 (${path}): ${response.status} ${response.statusText}`;
+                            console.error(errorMsg);
+                            window.lastModelLoadError = errorMsg;
+                            resolve(false);
+                            return;
+                        }
+                        console.log(`STL 파일 접근 성공 (${path})`);
+                        
+                        // 파일 접근 성공 시 STL 로더 사용
+                        const stlLoader = new STLLoader();
+                        
+                        stlLoader.load(
+                            path,
+                            (geometry) => {
+                                console.log('STL 로드 성공!', geometry);
+                                // 셰이딩 재질 적용
+                                const material = new THREE.MeshPhongMaterial({
+                                    color: 0x3366ff,  // 이클립스 파란색
+                                    shininess: 70,
+                                    specular: 0x444444
+                                });
+                                
+                                const mesh = new THREE.Mesh(geometry, material);
+                                mainModel = new THREE.Object3D();
+                                mainModel.add(mesh);
+                                
+                                // 모델 스케일 및 위치 조정
+                                mainModel.scale.set(0.1, 0.1, 0.1);
+                                mainModel.rotation.set(0, 0, 0);
+                                mainModel.position.set(0, 0, -0.5);
+                                
+                                // 씬에 추가 (처음에는 숨김)
+                                mainModel.visible = false;
+                                scene.add(mainModel);
+                                
+                                // 미리보기 업데이트
+                                updateModelPreview();
+                                
+                                resolve(true);
+                            },
+                            (xhr) => {
+                                const percent = xhr.total ? (xhr.loaded / xhr.total * 100).toFixed(0) : 'unknown';
+                                console.log(`STL 로딩 진행률: ${percent}%`);
+                                updateStatus('model-status', `모델 로딩 상태: STL 로드 중 ${percent}%`);
+                            },
+                            (error) => {
+                                const errorMsg = `STL 로드 오류 (${path}): ${error}`;
+                                console.error(errorMsg);
+                                window.lastModelLoadError = errorMsg;
+                                resolve(false);
+                            }
+                        );
+                    })
+                    .catch(error => {
+                        const errorMsg = `STL 파일 접근 중 네트워크 오류 (${path}): ${error}`;
+                        console.error(errorMsg);
+                        window.lastModelLoadError = errorMsg;
+                        resolve(false);
+                    });
+            });
+        }
+        
+        // 미리보기 업데이트
+        function updateModelPreview() {
+            if (!mainModel || !previewScene || !previewRenderer) return;
+            
+            // 기존 모델 제거
+            clearModelFromPreview();
+            
+            // 모델 복제 후 미리보기 씬에 추가
+            const previewModel = mainModel.clone();
+            previewModel.position.set(0, 0, 0);
+            previewModel.visible = true;
+            previewScene.add(previewModel);
+            
+            // 모델의 중심점에 파란 점 추가
+            const dotGeometry = new THREE.SphereGeometry(0.01, 16, 16);
+            const dotMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+            const centerDot = new THREE.Mesh(dotGeometry, dotMaterial);
+            previewScene.add(centerDot);
+            
+            // 모델 타입 표시 업데이트
+            document.getElementById('model-type').textContent = `모델 타입: ${modelType}`;
+            
+            // 미리보기 렌더링
+            animatePreview();
+        }
+        
+        // 미리보기에서 모델 제거
+        function clearModelFromPreview() {
+            if (!previewScene) return;
+            
+            previewScene.children.forEach(child => {
+                if (!(child instanceof THREE.GridHelper) && 
+                    !(child instanceof THREE.AmbientLight) && 
+                    !(child instanceof THREE.DirectionalLight)) {
+                    previewScene.remove(child);
+                }
+            });
+        }
+        
+        // 미리보기 애니메이션
+        function animatePreview() {
+            if (!previewScene || !previewCamera || !previewRenderer) return;
+            
+            requestAnimationFrame(animatePreview);
+            
+            // 모델 회전
+            previewScene.children.forEach(child => {
+                if (!(child instanceof THREE.GridHelper) && 
+                    !(child instanceof THREE.AmbientLight) && 
+                    !(child instanceof THREE.DirectionalLight)) {
+                    child.rotation.y += 0.01;
+                }
+            });
+            
+            // 렌더링
+            previewRenderer.render(previewScene, previewCamera);
+        }
+        
+        // 메인 애니메이션 루프
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (scene && camera && renderer) {
+                renderer.render(scene, camera);
+            }
+        }
+        
+        // 이미지 프레임 처리
+        function processVideo() {
+            if (!videoStarted || !video.readyState || !context) {
+                requestAnimationFrame(processVideo);
+                return;
+            }
+            
+            try {
+                // 비디오 프레임을 캔버스에 그리기
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // 이미지 데이터 가져오기
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // 이클립스 틴케이스 감지
+                const result = detectEclipseTincase(imageData);
+                
+                // 마커 상태 업데이트
+                updateStatus('marker-status', `마커 인식 상태: ${result.detected ? '인식됨' : '인식되지 않음'}`);
+                updateStatus('confidence', `마커 인식률(신뢰도): ${(result.confidence * 100).toFixed(1)}%`);
+                
+                // 마커 중심점에 파란 점 그리기
+                if (result.detected) {
+                    const centerX = result.centerX * canvas.width;
+                    const centerY = result.centerY * canvas.height;
+                    
+                    context.beginPath();
+                    context.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+                    context.fillStyle = 'blue';
+                    context.fill();
+                    context.strokeStyle = 'white';
+                    context.lineWidth = 2;
+                    context.stroke();
+                }
+                
+                // 모델 위치 및 가시성 업데이트
+                updateModelPosition(result);
+            } catch (error) {
+                console.error('프레임 처리 오류:', error);
+            }
+            
+            // 다음 프레임 처리
+            requestAnimationFrame(processVideo);
+        }
+        
+        // 모델 위치 및 가시성 업데이트
+        function updateModelPosition(result) {
+            if (!mainModel || !isModelLoaded) {
+                console.log('모델이 없거나 로드되지 않음:', { mainModel, isModelLoaded });
+                return;
+            }
+            
+            // 인식률 임계값 설정 (10%로 더 낮춤)
+            const CONFIDENCE_THRESHOLD = 0.10;
+            
+            // 디버그용 로깅 추가
+            console.log(`인식 상태: ${result.detected}, 신뢰도: ${(result.confidence * 100).toFixed(1)}%, 임계값: ${CONFIDENCE_THRESHOLD * 100}%, 모델 로드됨: ${isModelLoaded}, 모델 타입: ${modelType}`);
+            
+            if (result.detected && result.confidence >= CONFIDENCE_THRESHOLD) {
+                // 인식률이 임계값 이상일 때만 모델 표시
+                mainModel.visible = true;
+                console.log('모델 표시 설정됨: visible = true');
+                
+                // 화면 좌표를 3D 공간 좌표로 변환 (이동 속도 증가를 위해 계수 조정)
+                const x = (result.centerX - 0.5) * 5;  // -2.5 ~ 2.5 범위
+                const y = -(result.centerY - 0.5) * 2.5; // -1.25 ~ 1.25 범위 (y축 반전)
+                
+                // 모델 위치 설정 - 파란 점 위치와 정확히 일치하도록 조정
+                mainModel.position.set(x, y - 0.1, -0.3); // y축을 0.1만큼 아래로 내림
+                console.log('모델 위치 설정:', mainModel.position);
+                
+                // 모델 회전 설정
+                if (modelType.includes("폴백")) {
+                    mainModel.rotation.y += 0.02;
+                    mainModel.rotation.x = Math.PI/4;
+                } else {
+                    mainModel.rotation.set(0, 0, 0); // 회전 초기화
+                }
+                
+                // 모델 크기 설정
+                if (modelType.includes("폴백")) {
+                    const baseScale = 1.0;
+                    const pulseFactor = 1.0 + 0.05 * Math.sin(Date.now() * 0.003);
+                    mainModel.scale.set(
+                        baseScale * pulseFactor,
+                        baseScale * pulseFactor,
+                        baseScale * pulseFactor
+                    );
+                } else {
+                    const scale = 0.45; // 모델 크기를 1.5배로 증가 (0.3 * 1.5 = 0.45)
+                    mainModel.scale.set(scale, scale, scale);
+                }
+                
+                console.log('모델 크기:', mainModel.scale);
+                
+                // 디버그 정보 업데이트
+                updateStatus('marker-status', `마커 인식 상태: 인식됨 (${(result.confidence * 100).toFixed(1)}%)`);
+                
+                // 신뢰도 색상 변경
+                const confidenceElement = document.getElementById('confidence');
+                if (confidenceElement) {
+                    const percentage = result.confidence * 100;
+                    let color;
+                    if (percentage < 30) {
+                        color = 'orange';
+                    } else if (percentage < 60) {
+                        color = 'yellow';
+                    } else {
+                        color = 'lime';
+                    }
+                    confidenceElement.innerHTML = `마커 인식률(신뢰도): <span style="color:${color}; font-weight:bold">${percentage.toFixed(1)}%</span>`;
+                }
+            } else {
+                // 인식되지 않았거나 인식률이 임계값 미만인 경우 모델 숨김
+                mainModel.visible = false;
+                console.log('모델 표시 해제됨: visible = false');
+                
+                // 디버그 정보 업데이트
+                if (result.detected) {
+                    updateStatus('marker-status', `마커 인식 상태: 감지됨 (${(result.confidence * 100).toFixed(1)}%, 임계값 미달)`);
+                } else {
+                    updateStatus('marker-status', '마커 인식 상태: 감지되지 않음');
+                }
+            }
+        }
+        
+        // 이클립스 틴케이스 감지 함수
+        function detectEclipseTincase(imageData) {
+            const { width, height, data } = imageData;
+            
+            // 파란색 픽셀 감지 설정 - 감도 향상
+            const blueThreshold = 120;  // 파란색 임계값 낮춤
+            const redGreenMax = 110;    // 빨강/초록 최대값 약간 증가
+            const minBlueRatio = 0.005; // 최소 파란색 비율 낮춤
+            
+            let bluePixels = 0;
+            let totalPixels = width * height;
+            
+            // 파란색 픽셀의 무게중심 계산용
+            let sumX = 0;
+            let sumY = 0;
+            
+            // 파란색 픽셀 스캔
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const i = (y * width + x) * 4;
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    // 파란색 픽셀 조건 완화:
+                    if (b > blueThreshold && b > r * 1.3 && b > g * 1.3 && r < redGreenMax && g < redGreenMax) {
+                        bluePixels++;
+                        sumX += x;
+                        sumY += y;
+                    }
+                }
+            }
+            
+            // 파란색 비율 계산
+            const blueRatio = bluePixels / totalPixels;
+            
+            // 파란색 픽셀의 중심 계산 (0~1 범위)
+            let centerX = 0.5;
+            let centerY = 0.5;
+            
+            if (bluePixels > 0) {
+                centerX = (sumX / bluePixels) / width;
+                centerY = (sumY / bluePixels) / height;
+            }
+            
+            // 마커 감지 여부 및 신뢰도 계산
+            const detected = blueRatio >= minBlueRatio;
+            
+            // 신뢰도 계산 방식 개선 - 더 민감하게
+            const confidence = Math.min(blueRatio * 30, 1.0);  // 계수 증가
+            
+            // 디버깅용 로그
+            console.log(`파란색 비율: ${(blueRatio * 100).toFixed(2)}%, 신뢰도: ${(confidence * 100).toFixed(1)}%, 감지됨: ${detected}`);
+            
+            return {
+                detected: detected,
+                confidence: confidence,
+                centerX: centerX,
+                centerY: centerY
+            };
+        }
+        
+        // 페이지 로드 시 앱 초기화
+        window.addEventListener('DOMContentLoaded', initApp);
+    </script>
+</body>
+</html>

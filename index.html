@@ -173,7 +173,7 @@
         
         <!-- 제어 버튼 -->
         <div class="control-buttons">
-            <button id="refresh-camera">카메라 새로고침</button>
+            <button id="switch-camera">카메라 전환</button>
             <button id="refresh-model">모델 새로고침</button>
         </div>
     </div>
@@ -202,13 +202,14 @@
         let isMarkerDetected = false;
         let modelType = "없음";
         let videoStarted = false;
+        let currentCameraMode = 'environment'; // 'environment' 또는 'user'
         
         // DOM 요소 참조
         const loadingScreen = document.getElementById('loading-screen');
         const loadingStatus = document.getElementById('loading-status');
         const loadingHelp = document.getElementById('loading-help');
         const startButton = document.getElementById('start-button');
-        const refreshCameraButton = document.getElementById('refresh-camera');
+        const switchCameraButton = document.getElementById('switch-camera');
         const refreshModelButton = document.getElementById('refresh-model');
         
         // 텍스처 로더 초기화
@@ -252,7 +253,7 @@
         function initApp() {
             // 버튼 이벤트 리스너 설정
             startButton.addEventListener('click', initCamera);
-            refreshCameraButton.addEventListener('click', restartCamera);
+            switchCameraButton.addEventListener('click', switchCamera);
             refreshModelButton.addEventListener('click', loadModel);
             
             // 5초 후 자동으로 로딩 화면 숨기기
@@ -260,6 +261,15 @@
             
             // 카메라 초기화
             initCamera();
+        }
+        
+        // 카메라 전환 함수
+        function switchCamera() {
+            // 현재 카메라 모드 전환
+            currentCameraMode = currentCameraMode === 'environment' ? 'user' : 'environment';
+            
+            // 카메라 재시작
+            restartCamera();
         }
         
         // 카메라 초기화
@@ -271,8 +281,8 @@
             
             const constraints = { 
                 video: { 
-                    facingMode: { ideal: 'environment' },  // 후면 카메라 우선
-                    width: { ideal: 1920 },  // 고해상도 설정
+                    facingMode: { ideal: currentCameraMode },  // 현재 설정된 카메라 모드 사용
+                    width: { ideal: 1920 },
                     height: { ideal: 1080 }
                 }, 
                 audio: false 

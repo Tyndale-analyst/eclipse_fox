@@ -1070,7 +1070,10 @@
                         baseScale * pulseFactor
                     );
                 } else {
-                    const scale = 0.3; // 모델 크기를 1.5배로 증가 (0.2 * 1.5 = 0.3)
+                    // 인식률에 따라 크기 조절 (0.2 ~ 0.4 범위)
+                    const minScale = 0.2;
+                    const maxScale = 0.4;
+                    const scale = minScale + (maxScale - minScale) * result.confidence;
                     mainModel.scale.set(scale, scale, scale);
                 }
                 

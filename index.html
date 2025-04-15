@@ -270,7 +270,11 @@
             video = document.getElementById('mainVideo');
             
             const constraints = { 
-                video: true, 
+                video: { 
+                    facingMode: { ideal: 'environment' },  // 후면 카메라 우선
+                    width: { ideal: 1920 },  // 고해상도 설정
+                    height: { ideal: 1080 }
+                }, 
                 audio: false 
             };
             

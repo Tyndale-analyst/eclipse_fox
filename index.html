@@ -1045,7 +1045,7 @@
                 console.log('모델 표시 설정됨: visible = true');
                 
                 // 화면 좌표를 3D 공간 좌표로 변환 (이동 속도 증가를 위해 계수 조정)
-                const x = (result.centerX - 0.5) * 5;  // -2.5 ~ 2.5 범위
+                const x = (result.centerX - 0.5) * 2.5;  // -1.25 ~ 1.25 범위
                 const y = -(result.centerY - 0.5) * 2.5; // -1.25 ~ 1.25 범위 (y축 반전)
                 
                 // 모델 위치 설정 - 파란 점 위치와 정확히 일치하도록 조정
@@ -1070,7 +1070,7 @@
                         baseScale * pulseFactor
                     );
                 } else {
-                    const scale = 0.45; // 모델 크기를 1.5배로 증가 (0.3 * 1.5 = 0.45)
+                    const scale = 0.3; // 모델 크기를 1.5배로 증가 (0.2 * 1.5 = 0.3)
                     mainModel.scale.set(scale, scale, scale);
                 }
                 
